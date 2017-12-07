@@ -1652,7 +1652,7 @@
         <module>transport</module>
         <module>translator</module>
         <module>qa</module>
-
+        <module>camel</module>
         <module>sso</module>
 
         <!-- Extras  -->
