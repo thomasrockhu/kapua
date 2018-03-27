@@ -26,9 +26,11 @@
          http://www.springframework.org/schema/util/spring-util-3.2.xsd">
 
     <!-- Configure the ActiveMQ broker connection -->
-    <!-- we can use also the tcp regular connection. it should be no performance difference! -->
-    <bean id="kapuaConnectionFactory" class="org.apache.activemq.ActiveMQConnectionFactory" depends-on="message-broker-id">
-        <property name="brokerURL" value="vm://message-broker?create=false"/>
+    <bean id="kapuaConnectionFactory" class="org.apache.qpid.jms.JmsConnectionFactory">
+        <property name="remoteURI" value="amqp://192.168.33.10:5672"/>
+        <property name="username" value="kapua-sys" />
+        <property name="password" value="kapua-password" />
+        <property name="clientID" value="camel_client_data_message" />
     </bean>
 
     <bean id="cachingConnectionFactory" class="org.springframework.jms.connection.CachingConnectionFactory">
@@ -42,30 +44,25 @@
         <property name="cacheLevelName" value="CACHE_CONSUMER"/>
     </bean>
 
-    <bean id="activemq" class="org.apache.activemq.camel.component.ActiveMQComponent">
-        <property name="configuration" ref="jmsConfig"/>
-    </bean>
+    <bean id="amqp" class="org.apache.camel.component.amqp.AMQPComponent">
+        <property name="configuration" ref="jmsConfig" />
+    </bean>  
     <!--  create connection pooling!!! -->
 
     <!-- session filers (to bind Kapua and Shiro thread context) -->
     <bean id="kapuaCamelFilter" class="org.eclipse.kapua.broker.core.converter.KapuaCamelFilter">
     </bean>
 
-    <bean id="kapuaCamelDefaultRouter" class="org.eclipse.kapua.broker.core.router.CamelKapuaDefaultRouter">
-    </bean>
     <!-- Converter -->
-    <bean id="deviceManagementNotificationConverter" class="org.eclipse.kapua.broker.core.converter.DeviceManagementNotificationConverter"/>
-    <bean id="kapuaLifeCycleConverter" class="org.eclipse.kapua.broker.core.converter.KapuaLifeCycleConverter"/>
+    <bean id="kapuaDataConverter" class="org.eclipse.kapua.broker.core.converter.KapuaDataConverter"/>
 
     <!-- Consumer -->
     <!-- ASSISTANTS -->
-    <bean id="deviceMessageListener" class="org.eclipse.kapua.broker.core.listener.DeviceMessageListener">
-    </bean>
     <bean id="dataStorageMessageProcessor" class="org.eclipse.kapua.broker.core.listener.DataStorageMessageProcessor">
     </bean>
-    <bean id="deviceManagementNotificationMessageProcessor" class="org.eclipse.kapua.broker.core.listener.DeviceManagementNotificationMessageProcessor"></bean>
     <!-- ERROR -->
-    <bean id="errorMessageListener" class="org.eclipse.kapua.broker.core.listener.ErrorMessageListener" />
+    <bean id="errorMessageListener" class="org.eclipse.kapua.broker.core.listener.ErrorMessageListener">
+    </bean>
 
     <camelContext id="camelContext" xmlns="http://camel.apache.org/schema/spring">
         <!-- the beans are defined as spring bean so check if it's possible to remove the package scan at all. Remove also the endpoint annotation from the pojo endpoints and all should works. -->
@@ -77,7 +74,7 @@
         <!-- exception/error handler -->
         <!--
         by default the errorHandler forward the message to a dead letter queue but in that way we lose the failure end point
-        deadLetterUri="activemq:queue:processedMessageWithError"
+        deadLetterUri="amqp:queue:processedMessageWithError"
         if we forward the message directly to an end point with the exchange in the signature
         deadLetterUri="bean:errorMessagePojo?method=processMessage"
         we have these properties evaluated (in the exchange field)
@@ -88,12 +85,12 @@
         -->
         <errorHandler id="mainRouteMessageErrorHandler" redeliveryPolicyRef="kapuaRedeliveryPolicy"
                       type="DeadLetterChannel"
-                      deadLetterUri="activemq:queue:notProcessableMessage"
+                      deadLetterUri="bean:errorMessageListener?method=processMessage"
                       useOriginalMessage="true">
         </errorHandler>
         <errorHandler id="messageErrorHandler" redeliveryPolicyRef="kapuaErrorRedeliveryPolicy"
                       type="DeadLetterChannel"
-                      deadLetterUri="activemq:queue:notProcessableMessage"
+                      deadLetterUri="amqp:queue:notProcessableMessage"
                       useOriginalMessage="true">
         </errorHandler>
         <redeliveryPolicyProfile id="kapuaRedeliveryPolicy" maximumRedeliveries="0" redeliveryDelay="0" retryAttemptedLogLevel="WARN" logRetryAttempted="true" />
@@ -114,33 +111,94 @@
         transacted=false
         -->
         <route errorHandlerRef="mainRouteMessageErrorHandler" id="mainKapuaRoute">
-            <from uri="activemq:queue:Consumer.eurotech:mainRoutelisteners:EXACTLY_ONCE.VirtualTopic.>?asyncConsumer=false&amp;acknowledgementModeName=CLIENT_ACKNOWLEDGE&amp;transacted=false&amp;concurrentConsumers=20&amp;maxConcurrentConsumers=50"/>
+            <from uri="amqp:queue:Consumer.eurotech:camel_client_id_TO_REPLACE_WITH_UNIQUE_ID:EXACTLY_ONCE.VirtualTopic.>?asyncConsumer=false&amp;acknowledgementModeName=CLIENT_ACKNOWLEDGE&amp;transacted=false&amp;concurrentConsumers=20&amp;maxConcurrentConsumers=50"/>
+            <!--  handling timeout and communication exceptions in a retry queue -->
+            <onException>
+                <exception>org.eclipse.kapua.service.datastore.DatastoreCommunicationException</exception>
+                <redeliveryPolicy maximumRedeliveries="0" logRetryAttempted="true" retryAttemptedLogLevel="WARN"/>
+                <handled>
+                    <constant>true</constant>
+                </handled>
+                <to uri="amqp:queue:storeCommunicationException"/>
+            </onException>
+            <!-- handling configuration error -->
+            <onException>
+                <exception>org.eclipse.kapua.service.datastore.ConfigurationException</exception>
+                <redeliveryPolicy maximumRedeliveries="0" logRetryAttempted="true" retryAttemptedLogLevel="WARN"/>
+                <handled>
+                    <constant>true</constant>
+                </handled>
+                <to uri="amqp:queue:storeConfigurationException"/>
+            </onException>
+            <onException>
+                <exception>org.eclipse.kapua.service.datastore.DatastoreException</exception>
+                <redeliveryPolicy maximumRedeliveries="0" logRetryAttempted="true" retryAttemptedLogLevel="WARN"/>
+                <handled>
+                    <constant>true</constant>
+                </handled>
+                <to uri="amqp:queue:storeGenericException"/>
+            </onException>
             <onException>
                 <exception>org.eclipse.kapua.KapuaException</exception>
                 <redeliveryPolicy maximumRedeliveries="0" logRetryAttempted="true" retryAttemptedLogLevel="WARN"/>
                 <handled>
                     <constant>true</constant>
                 </handled>
-                <bean ref="kapuaCamelFilter" method="bridgeError"/>
-                <to uri="activemq:queue:notProcessableMessage"/>
+                <to uri="amqp:queue:notProcessableMessage"/>
             </onException>
             <pipeline>
-                <doTry>
-                    <bean ref="kapuaCamelFilter" method="bindSession"/>
-                    <dynamicRouter>
-                        <method ref="kapuaCamelDefaultRouter" method="defaultRoute" ></method>
-                    </dynamicRouter>
-                    <doFinally>
+                <choice id="choice">
+                    <when id="systemMessageFilter">
+                        <simple>${header.originalTopic} regex '(^(?!\$EDC\.).*)'</simple>
+                        <bean ref="kapuaCamelFilter" method="bindSession"/>
+                        <bean ref="kapuaDataConverter" method="convertToData"/>
+                        <to uri="bean:dataStorageMessageProcessor?method=processMessage"/>
                         <bean ref="kapuaCamelFilter" method="unbindSession"/>
-                    </doFinally>
-                </doTry>
+                    </when>
+                </choice>
             </pipeline>
         </route>
-        <route id="notProcessableMessage" >
-            <from uri="activemq:queue:notProcessableMessage?asyncConsumer=false&amp;acknowledgementModeName=CLIENT_ACKNOWLEDGE&amp;transacted=false&amp;concurrentConsumers=2&amp;maxConcurrentConsumers=5"/>
+        <route errorHandlerRef="messageErrorHandler" id="dataMessageCommunicationErrorRoute">
+            <from uri="amqp:queue:storeCommunicationException?asyncConsumer=false&amp;acknowledgementModeName=CLIENT_ACKNOWLEDGE&amp;transacted=false&amp;concurrentConsumers=2&amp;maxConcurrentConsumers=5"/>
+            <pipeline>
+                <delay>
+                    <constant>1000</constant>
+                </delay>
+                <bean ref="kapuaCamelFilter" method="bindSession"/>
+                <bean ref="kapuaDataConverter" method="convertToDataOnException"/>
+                <to uri="bean:dataStorageMessageProcessor?method=processCommunicationErrorMessage"/>
+                <bean ref="kapuaCamelFilter" method="unbindSession"/>
+            </pipeline>
+        </route>
+        <route errorHandlerRef="messageErrorHandler" id="dataMessageConfigurationErrorRoute">
+            <from uri="amqp:queue:storeConfigurationException?asyncConsumer=false&amp;acknowledgementModeName=CLIENT_ACKNOWLEDGE&amp;transacted=false&amp;concurrentConsumers=2&amp;maxConcurrentConsumers=5"/>
+            <pipeline>
+                <delay>
+                    <constant>1000</constant>
+                </delay>
+                <bean ref="kapuaCamelFilter" method="bindSession"/>
+                <bean ref="kapuaDataConverter" method="convertToDataOnException"/>
+                <to uri="bean:dataStorageMessageProcessor?method=processConfigurationErrorMessage"/>
+                <bean ref="kapuaCamelFilter" method="unbindSession"/>
+            </pipeline>
+        </route>
+        <route errorHandlerRef="messageErrorHandler" id="dataMessageGenericErrorRoute">
+            <from uri="amqp:queue:storeGenericException?asyncConsumer=false&amp;acknowledgementModeName=CLIENT_ACKNOWLEDGE&amp;transacted=false&amp;concurrentConsumers=2&amp;maxConcurrentConsumers=5"/>
+            <pipeline>
+                <delay>
+                    <constant>1000</constant>
+                </delay>
+                <bean ref="kapuaCamelFilter" method="bindSession"/>
+                <bean ref="kapuaDataConverter" method="convertToDataOnException"/>
+                <to uri="bean:dataStorageMessageProcessor?method=processGenericErrorMessage"/>
+                <bean ref="kapuaCamelFilter" method="unbindSession"/>
+            </pipeline>
+        </route>
+        <route id="dataMessageNotProcessableErrorRoute" >
+            <from uri="amqp:queue:notProcessableMessage?asyncConsumer=false&amp;acknowledgementModeName=CLIENT_ACKNOWLEDGE&amp;transacted=false&amp;concurrentConsumers=2&amp;maxConcurrentConsumers=5"/>
             <pipeline>
                 <bean ref="kapuaCamelFilter" method="bindSession"/>
-                <to uri="bean:errorMessageListener?method=processMessage"/>
+                <to uri="bean:dataStorageMessageProcessor?method=notProcessableMessage"/>
                 <bean ref="kapuaCamelFilter" method="unbindSession"/>
             </pipeline>
         </route>
