@@ -25,6 +25,7 @@ import org.eclipse.kapua.model.id.KapuaId;
 import org.eclipse.kapua.qa.common.TestJAXBContextProvider;
 import org.eclipse.kapua.service.account.Account;
 import org.eclipse.kapua.service.account.AccountService;
+import org.eclipse.kapua.service.datastore.DatastoreException;
 import org.eclipse.kapua.service.datastore.DatastoreObjectFactory;
 import org.eclipse.kapua.service.datastore.MessageStoreService;
 import org.eclipse.kapua.service.datastore.client.ClientException;

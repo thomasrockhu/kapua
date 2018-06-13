@@ -16,7 +16,7 @@ import org.eclipse.kapua.commons.model.id.KapuaEid;
 import org.eclipse.kapua.commons.util.KapuaDateUtils;
 import org.eclipse.kapua.commons.util.xml.XmlUtil;
 import org.eclipse.kapua.model.id.KapuaId;
-import org.eclipse.kapua.service.datastore.internal.mediator.DatastoreException;
+import org.eclipse.kapua.service.datastore.DatastoreException;
 import org.eclipse.kapua.service.datastore.internal.mediator.DatastoreUtils;
 
 import org.eclipse.kapua.qa.markers.junit.JUnitTests;

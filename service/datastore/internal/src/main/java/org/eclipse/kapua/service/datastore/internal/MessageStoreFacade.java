@@ -24,7 +24,6 @@ import org.eclipse.kapua.message.device.data.KapuaDataChannel;
 import org.eclipse.kapua.message.internal.device.data.KapuaDataChannelImpl;
 import org.eclipse.kapua.model.id.KapuaId;
 import org.eclipse.kapua.service.datastore.ConfigurationException;
-import org.eclipse.kapua.service.datastore.DatastoreException;
 import org.eclipse.kapua.service.datastore.client.ClientException;
 import org.eclipse.kapua.service.datastore.client.ClientUnavailableException;
 import org.eclipse.kapua.service.datastore.client.DatastoreClient;
